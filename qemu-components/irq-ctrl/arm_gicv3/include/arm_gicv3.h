@@ -31,7 +31,6 @@ public:
 
 protected:
     cci::cci_param<unsigned int> p_num_cpu;
-    cci::cci_param<unsigned int> p_first_cpu_index;
     cci::cci_param<unsigned int> p_num_spi;
     cci::cci_param<unsigned int> p_revision;
     cci::cci_param<std::vector<unsigned int> > p_redist_region;
@@ -64,8 +63,6 @@ public:
     {
         if (inst.is_kvm_enabled()) {
             return "kvm-arm-gicv3";
-        } else if (inst.is_whpx_enabled()) {
-            return "whpx-arm-gicv3";
         } else {
             return "arm-gicv3";
         }
@@ -74,7 +71,6 @@ public:
     arm_gicv3(const sc_core::sc_module_name& name, QemuInstance& inst, unsigned num_cpus = 0)
         : QemuDevice(name, inst, get_gicv3_type(inst))
         , p_num_cpu("num_cpus", num_cpus, "Number of CPU interfaces")
-        , p_first_cpu_index("first_cpu_index", 0, "index of the first cpu attached to the GIC (default 0)")
         , p_num_spi("num_spi", 0, "Number of shared peripheral interrupts")
         , p_revision("revision", 3, "Revision of the GIC (3 -> v3, 4 -> v4)")
         // , p_redist_region("redist_region", std::vector<unsigned int>({}),
@@ -104,13 +100,18 @@ public:
         int i;
 
         m_dev.set_prop_int("num-cpu", p_num_cpu);
-        m_dev.set_prop_int("first-cpu-index", p_first_cpu_index);
         m_dev.set_prop_int("num-irq", p_num_spi + NUM_PPI);
         m_dev.set_prop_int("revision", p_revision);
 
-        bool irqchip_in_kernel = m_inst.is_kvm_enabled() || m_inst.is_whpx_enabled();
-        bool has_security_extensions = irqchip_in_kernel ? false : p_has_security_extensions.get_value();
-        bool has_lpi = irqchip_in_kernel ? false : p_has_lpi.get_value();
+        // LPI support for ITS
+        m_dev.set_prop_bool("has-lpi", true);  // Enable LPI support
+        //m_dev.set_prop_int("lpi-id-bits", 16); // Number of LPI ID bits
+        
+        std::shared_ptr<qemu::MemoryRegion> sysmem = get_qemu_inst().get().get_system_memory();
+        m_dev.set_prop_link("sysmem", *sysmem);
+
+        bool has_security_extensions = m_inst.is_kvm_enabled() ? false : p_has_security_extensions.get_value();
+        bool has_lpi = p_has_lpi.get_value();
         m_dev.set_prop_bool("has-security-extensions", has_security_extensions);
         m_dev.set_prop_bool("has-lpi", has_lpi);
         if (has_lpi) {
@@ -154,7 +155,7 @@ public:
             vfiq_out[cpu].init_sbd(sbd, p_num_cpu * 3 + cpu);
         }
 
-        if (m_inst.is_kvm_enabled() || m_inst.is_whpx_enabled()) {
+        if (m_inst.is_kvm_enabled()) {
             uint64_t val;
             qemu::MemoryRegionOps::MemTxAttrs attrs = {};
             sc_core::sc_object* init_obj = gs::find_sc_obj(nullptr, "platform.global_peripheral_initiator_arm_0");

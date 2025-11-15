@@ -15,33 +15,15 @@ option(GS_ENABLE_LTO "Use LTO to build" OFF)
 option(GS_ENABLE_SANITIZERS "Enable ASan+UBSan" OFF)
 option(GS_ENABLE_SCUDO "Enable Scudo allocator" OFF)
 option(GS_ENABLE_TSAN "Enable Thread Sanitizer" OFF)
+option(GS_ENABLE_VIRCLRENDERER "Enable/Disable virclrenderer" ON)
+option(GS_ENABLE_VIRGLRENDERER "Enable/Disable virglrenderer" ON)
+option(WITHOUT_PYTHON_BINDER "without python binder model" OFF)
 option(QEMU_ENABLE_USB_REDIRECT "enable qemu usb redirect" OFF)
 
-option(ENABLE_PYTHON_BINDER "Enable python binder model" ON)
-option(WITHOUT_PYTHON_BINDER "[DEPRECATED] Use ENABLE_PYTHON_BINDER=OFF instead" OFF)
-
-# Handle deprecated WITHOUT_PYTHON_BINDER option
-if(WITHOUT_PYTHON_BINDER AND NOT ENABLE_PYTHON_BINDER)
-    message(FATAL_ERROR "Cannot use both WITHOUT_PYTHON_BINDER and ENABLE_PYTHON_BINDER. "
-        "WITHOUT_PYTHON_BINDER is deprecated, please use only ENABLE_PYTHON_BINDER.")
-elseif(WITHOUT_PYTHON_BINDER)
-    message(DEPRECATION "WITHOUT_PYTHON_BINDER is deprecated. Use ENABLE_PYTHON_BINDER=OFF instead.")
-    set(ENABLE_PYTHON_BINDER OFF)
-endif()
-
-
-if(WIN32)
-    option(GS_ENABLE_VIRCLRENDERER "Enable/Disable virclrenderer" OFF)
-    option(GS_ENABLE_VIRGLRENDERER "Enable/Disable virglrenderer" OFF)
-else()
-    option(GS_ENABLE_VIRCLRENDERER "Enable/Disable virclrenderer" ON)
-    option(GS_ENABLE_VIRGLRENDERER "Enable/Disable virglrenderer" ON)
-endif()
-
-
-set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ standard to build all targets.")
+set(CMAKE_CXX_STANDARD 14 CACHE STRING "C++ standard to build all targets.")
 set(CMAKE_CXX_STANDARD_REQUIRED ON CACHE BOOL "The with CMAKE_CXX_STANDARD selected C++ standard is a requirement.")
 set(GIT_BRANCH "main" CACHE STRING "Git branch from which to clone all gs repositoies")
+set(GREENSOCS_GIT "" CACHE STRING "Git directory from which to clone all gs repositories")
 set(PKG_LOCK "package-lock.cmake" CACHE STRING "Package lock which will be used by the user")
 set(QEMU_PATH_NAME "" CACHE STRING "The name of the path of qemu in the git directory")
 
@@ -49,39 +31,16 @@ set(CMAKE_FIND_USE_PACKAGE_REGISTRY FALSE)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
-set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared libraries" FORCE)
-
-# Dependencies URLs
-set(LIBQEMU_GIT "https://github.com/qualcomm/qemu.git" CACHE STRING "libqemu  git url")
-set(SYSTEMC_GIT "https://github.com/accellera-official/systemc.git" CACHE STRING "SystemC git url")
-set(CCI_GIT "https://github.com/accellera-official/cci.git" CACHE STRING "SystemC Configuration, Control and Inspection (CCI) Library git url")
-set(SCP_GIT "https://github.com/accellera-official/systemc-common-practices.git" CACHE STRING "SystemC Common Practices (SCP) git url")
 
 # Generate a compile_commands.json file for our build,
 # for use by clang_complete, YouCompleteMe, vscode, etc.
 set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 
-if (NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
-    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
-endif()
-
 include(CMakePackageConfigHelpers)
 include(CTest)
 include(GNUInstallDirs)
-# On Windows, install executables and DLLs directly under CMAKE_INSTALL_PREFIX
-# instead of the default bin/ subdirectory.
-if(WIN32)
-    set(CMAKE_INSTALL_BINDIR "." CACHE PATH "" FORCE)
-endif()
 include(FetchContent)
 include(FindPackageHandleStandardArgs)
-
-# Define _WIN32_WINNT to Windows 10
-# This macro definition is required by rpclib
-if (WIN32)
-    add_definitions(-D_WIN32_WINNT=0x0A00)
-endif()
-
 
 file(
     DOWNLOAD
@@ -91,7 +50,49 @@ file(
 include(${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake)
 include(${PROJECT_SOURCE_DIR}/cmake/boilerplate.cmake)
 
-add_library(qbox-common INTERFACE)
+macro(determine_qemu_git_path)
+    string(FIND "${GREENSOCS_GIT}" "github" GITHUB_URL)
+
+    if(GITHUB_URL EQUAL -1)
+        set(QEMU_PATH_NAME "qemu/qemu")
+    else()
+        set(QEMU_PATH_NAME "qemu")
+    endif()
+
+    message(STATUS "QEMU_PATH_NAME=${QEMU_PATH_NAME}")
+endmacro()
+
+macro(determine_qbox_git_url)
+    execute_process(
+        COMMAND git config --get remote.origin.url
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        OUTPUT_VARIABLE GIT_URL
+    )
+
+    string(REGEX MATCH "(.*\/)" GREENSOCS_GIT_ORIGIN "${GIT_URL}")
+    string(
+        REGEX
+        REPLACE "(.*)/sandboxes/[^\/]*/(.*)" "\\1/"
+        GREENSOCS_GIT_ORIGIN "${GREENSOCS_GIT_ORIGIN}"
+    )
+
+    if("${GREENSOCS_GIT}" STREQUAL "")
+        set(GREENSOCS_GIT "${GREENSOCS_GIT_ORIGIN}")
+    endif()
+
+    determine_qemu_git_path()
+
+    if(EXISTS "${PROJECT_SOURCE_DIR}/Packages")
+        if("${GREENSOCS_GIT}" STREQUAL "")
+            set(GREENSOCS_GIT "https://git.codelinaro.org/clo/private/qqvp/")
+        endif()
+    endif()
+
+    message(STATUS "GREENSOCS_GIT = ${GREENSOCS_GIT}")
+endmacro()
+
+determine_qbox_git_url()
 
 # Allow using package-lock.cmake files in projects using this boilerplate to
 # pin repos, etc.
@@ -206,41 +207,34 @@ mark_as_advanced(CMAKE_CXX_STANDARD_REQUIRED)
 #This is an exclusive define for the SCP library which allow to switch ON/OFF if we want thread local or not.
 add_compile_definitions(DISABLE_REPORT_THREAD_LOCAL)
 
-# System / local packages (must be installed on the host)
-find_package(Threads REQUIRED)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBELF REQUIRED IMPORTED_TARGET libelf)
-pkg_check_modules(LIBZIP REQUIRED IMPORTED_TARGET libzip)
-pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0)
+find_path(LIBELF_INCLUDE_DIR NAMES "libelf.h" "libelf/libelf.h"
+          HINTS $ENV{LIBELF_HOME}/include /usr/include /usr/local/include
+          REQUIRED)
 
-# CPM packages (fetched from source)
+find_library(LIBELF_LIBRARIES NAMES elf "libelf.a"
+          HINTS $ENV{LIBELF_HOME}/lib /usr/lib /lib /usr/local/lib
+          REQUIRED)
+
+find_library(LIBZ_LIBRARIES NAMES z "libz.a"
+          HINTS $ENV{LIBZ_HOME}/lib /usr/lib /lib
+          REQUIRED)
+
+list(APPEND LIBELF_LIBRARIES ${LIBZ_LIBRARIES})
+list(APPEND LIBELF_INCLUDE_DIR ${LIBELF_INCLUDE_DIR}/libelf)
+
+FIND_PACKAGE_HANDLE_STANDARD_ARGS(LibELF DEFAULT_MSG
+                                  LIBELF_LIBRARIES
+                                  LIBELF_INCLUDE_DIR)
+
+mark_as_advanced(LIBELF_INCLUDE_DIR LIBELF_LIBRARIES)
+
+find_package(Threads REQUIRED)
+
 gs_addexpackage("gh:google/googletest#v1.15.2")
 gs_addexpackage("gh:lua/lua#v5.4.2")
-
-find_package(Git QUIET)
-if(Git_FOUND)
-    set(PATCH_EXEC_CMD ${GIT_EXECUTABLE})
-    set(PATCH_ARGS -c "user.name=qqvp_ci" -c "user.email=qqvp_ci@qualcomm.com" am)
-else()
-    message(FATAL_ERROR "Couldn't find git executable for rpclib patching")
-endif()
-
-
-FILE(GLOB RPCLIB_PATCH_FILES "${CMAKE_CURRENT_SOURCE_DIR}/patch/rpclib/*.patch")
-
-gs_addexpackage(
-    NAME rpclib
-    GIT_REPOSITORY
-    https://github.com/rpclib/rpclib.git
-    GIT_TAG
-    v2.3.0
-    GIT_SHALLOW
-    TRUE
-    PATCH_COMMAND
-    ${PATCH_EXEC_CMD} ${PATCH_ARGS} "${RPCLIB_PATCH_FILES}"
-    UPDATE_DISCONNECTED
-    1
-)
+gs_addexpackage("gh:nih-at/libzip#v1.10.1")
+gs_addexpackage("gh:rpclib/rpclib#v2.3.0")
+gs_addexpackage("gh:TheLartians/PackageProject.cmake@1.4.1")
 
 gs_systemc()
 
@@ -253,35 +247,24 @@ if(NOT GS_ONLY)
     set(CROW_DEP "Crow::Crow")
 endif()
 
-if(ENABLE_PYTHON_BINDER AND (NOT GS_ONLY))
+if((NOT WITHOUT_PYTHON_BINDER) AND (NOT GS_ONLY))
     find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
-    set(PYBIND11_FINDPYTHON ON)
     gs_addexpackage("gh:pybind/pybind11#v3.0.1")
     set(PYBIND11_EMBED "pybind11::embed")
 endif()
 
 set(systemc_srcs
     systemc-components/common/src/cciutils.cc
-    systemc-components/common/src/elf_loader.cc
     systemc-components/common/src/luautils.cc
     systemc-components/common/src/uutils.cc
     systemc-components/common/src/memory_services.cc
-    systemc-components/common/src/module_factory_container.cc
-    systemc-components/common/src/zip_loader.cc
-    systemc-components/common/src/reg_model_maker.cc
     systemc-components/common/src/libgssync/pre_suspending_sc_support.cc
     systemc-components/common/src/libgssync/qk_factory.cc
     systemc-components/common/src/libgssync/qkmultithread.cc
-    systemc-components/common/src/dynlib_loader.cc
+    systemc-components/common/src/macs/backends/tap.cc
+    systemc-components/common/src/macs/components/mac.cc
+    systemc-components/common/src/macs/components/phy.cc
 )
-
-if (NOT WIN32)
-    list(APPEND systemc_srcs
-        systemc-components/common/src/macs/backends/tap.cc
-        systemc-components/common/src/macs/components/mac.cc
-        systemc-components/common/src/macs/components/phy.cc
-    )
-endif()
 
 if (NOT WITHOUT_QEMU)
     set (qemu_srcs
@@ -292,7 +275,7 @@ if (NOT WITHOUT_QEMU)
             qemu-components/common/src/libqemu-cxx/gpex.cc
             qemu-components/common/src/libqemu-cxx/gpio.cc
             qemu-components/common/src/libqemu-cxx/libqemu-cxx.cc
-            qemu-components/common/src/libqemu-cxx/libqemu-plugin.cc
+            qemu-components/common/src/libqemu-cxx/loader.cc
             qemu-components/common/src/libqemu-cxx/memory.cc
             qemu-components/common/src/libqemu-cxx/object.cc
             qemu-components/common/src/libqemu-cxx/rcu-read-lock.cc
@@ -316,14 +299,107 @@ add_library(${PROJECT_NAME} SHARED
 
 build_lua()
 
-if (WIN32)
-    add_executable(dll_cleanup_helper
-        systemc-components/common/src/dll_cleanup_helper.cc
-    )
-    install(TARGETS dll_cleanup_helper DESTINATION ${CMAKE_INSTALL_BINDIR})
-endif()
-
 if (NOT WITHOUT_QEMU)
+
+    # TODO(Jhieb) pull request changes to make sure capabilities are DWORD aligned.
+    CPMAddPackage(
+        NAME pcie_model
+        GIT_REPOSITORY "https://github.com/joshwhieb/pcie-model.git"
+        GIT_TAG "master"
+        GIT_SHALLOW TRUE
+    )
+
+
+    set(LIBPCIE_DIR ${pcie_model_SOURCE_DIR}/libpcie)
+    set(LIBPCIE_C_SOURCES
+        ${LIBPCIE_DIR}/src/pcie/cosim_common.c
+        ${LIBPCIE_DIR}/src/pcie/cosim_socket.c
+        ${LIBPCIE_DIR}/src/pcie/cosim_tlp.c
+        ${LIBPCIE_DIR}/src/pcie/pcie.c
+        ${LIBPCIE_DIR}/src/pcie/pseudocore.c
+        ${LIBPCIE_DIR}/src/pcie/platform.c
+        ${LIBPCIE_DIR}/src/pcie/pcie_cfgspc.c
+        ${LIBPCIE_DIR}/src/pcie/pcie_cfgutil.c
+        ${LIBPCIE_DIR}/src/pcie/pcie_msix.c
+    )
+
+    # C++ sources from the TLM modules
+    set(LIBPCIE_CXX_SOURCES
+        ${pcie_model_SOURCE_DIR}/tlm-modules/pcie-controller.cc
+        ${pcie_model_SOURCE_DIR}/tlm-modules/libpcie-callbacks.cc
+    )
+
+    # Create the static library
+    add_library(libpcie STATIC 
+        ${LIBPCIE_C_SOURCES}
+        ${LIBPCIE_CXX_SOURCES}
+    )
+
+    # Set the output name to libpcie.a (without the extra 'lib' prefix)
+    set_target_properties(libpcie PROPERTIES OUTPUT_NAME pcie)
+
+    # Add compile definitions
+    target_compile_definitions(libpcie PRIVATE
+        __STDC_WANT_LIB_EXT2__=1
+        CONFIG_TLM=1
+    )
+
+    # Set include directories
+    target_include_directories(libpcie PUBLIC
+        ${LIBPCIE_DIR}/src
+        ${pcie_model_SOURCE_DIR}
+        ${systemclanguage_SOURCE_DIR}/src
+    )
+
+    # Set compile options (matching the original Makefile)
+    target_compile_options(libpcie PRIVATE
+        -fPIC
+        $<$<CONFIG:Debug>:-g3 -O0>
+        $<$<CONFIG:Release>:-O2>
+    )
+
+    # Link against SystemC
+    target_link_libraries(libpcie PUBLIC
+        SystemC::systemc
+    )
+
+    CPMAddPackage(
+        NAME libslirp
+        GIT_REPOSITORY https://gitlab.freedesktop.org/slirp/libslirp.git
+        GIT_TAG v4.8.0
+        GIT_SHALLOW TRUE
+        DOWNLOAD_ONLY YES
+    )
+
+    find_program(MESON meson)
+    if(NOT MESON)
+        message(FATAL_ERROR "meson not found")
+    endif()
+
+    execute_process(
+        COMMAND ${MESON} setup --default-library static --prefix ${libslirp_BINARY_DIR}/libslirp-prefix/ ${libslirp_BINARY_DIR} ${libslirp_SOURCE_DIR}
+        WORKING_DIRECTORY ${libslirp_SOURCE_DIR}
+        RESULT_VARIABLE result
+        ERROR_VARIABLE error_output
+    )
+
+    if(result)
+        message(FATAL_ERROR "The command 'meson setup' failed with the output error: \n${error_output}")
+    endif()
+
+    execute_process(
+        COMMAND ${MESON} install -C ${libslirp_BINARY_DIR}
+        WORKING_DIRECTORY ${libslirp_SOURCE_DIR}
+        RESULT_VARIABLE result
+        ERROR_VARIABLE error_output
+    )
+
+    if(result)
+        message(FATAL_ERROR "The command 'meson install' failed with the output error: \n${error_output}")
+    endif()
+
+    set(CONFIGURE_ENVIRONMENT_VARIABLE "PKG_CONFIG_PATH=${libslirp_BINARY_DIR}/libslirp-prefix/lib/${CMAKE_LIBRARY_ARCHITECTURE}/pkgconfig/")
+
     # TODO: Remove the "hack" in the future, once support for Ubuntu 20 can be
     # dropped. A fix for it was added in CMake 3.18, but the default version of
     # Ubuntu 20 is 3.16
@@ -332,41 +408,68 @@ if (NOT WITHOUT_QEMU)
     # submodule. See https://gitlab.kitware.com/cmake/cmake/-/issues/20579
     CPMAddPackage(
         NAME qemu
-        GIT_REPOSITORY "${LIBQEMU_GIT}"
+        GIT_REPOSITORY "${GREENSOCS_GIT}/${QEMU_PATH_NAME}.git"
         GIT_TAG "${GIT_BRANCH}"
         GIT_SHALLOW TRUE
         GIT_SUBMODULES "CMakeLists.txt"
     )
 
     if(TARGET libqemu)
-        target_link_libraries(qbox-common INTERFACE libqemu)
+        list(APPEND TARGET_LIBS "libqemu")
     endif()
+
+    set(LIBQEMU_CXX_SRC_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/qemu-components/common/include/libqemu-cxx)
+    set(LIBQEMU_CXX_INCLUDE_DIR ${CMAKE_INSTALL_PREFIX})
+    set(LIBQEMU_CXX_LIB_DIR ${CMAKE_INSTALL_LIBDIR}/libqemu-cxx)
+
+    foreach(target ${LIBQEMU_TARGETS})
+        # The quite complex generator expressions does the followings:
+        #   - fetch the library name through the INTERFACE_LINK_LIBRARIES property
+        #   - evaluate it as a generator expression since it can contains
+        #     $<BUILD_INTERFACE> and $<INSTALL_INTERFACE> in a list
+        #   - join the result to remove empty elements in the final list
+        target_compile_definitions(${PROJECT_NAME}
+            PRIVATE
+                LIBQEMU_TARGET_${target}_LIBRARY="$<JOIN:$<GENEX_EVAL:$<TARGET_PROPERTY:libqemu-${target},INTERFACE_LINK_LIBRARIES>>,>")
+    endforeach()
 
     target_include_directories(
         ${PROJECT_NAME} PUBLIC
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/qemu-components/common/include>
-        $<INSTALL_INTERFACE:qemu-components/common/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_PREFIX}>
     )
 
-    target_include_directories(
-        ${PROJECT_NAME} BEFORE PUBLIC
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/qemu-components/common/include/glib_shim>
-        $<INSTALL_INTERFACE:qemu-components/common/include/glib_shim>
+    target_link_libraries(${PROJECT_NAME} PUBLIC
+        libqemu
     )
 
-    target_link_libraries(${PROJECT_NAME} PUBLIC libqemu::libqemu)
+    install(DIRECTORY ${LIBQEMU_CXX_SRC_INCLUDE_DIR}
+        DESTINATION ${LIBQEMU_CXX_INCLUDE_DIR})
 
-    set(LIBQEMU_CXX_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/qemu-components/common/include/libqemu-cxx)
-    install(DIRECTORY ${LIBQEMU_CXX_INCLUDE_DIR} TYPE INCLUDE)
+    if (WIN32)
+        install(TARGETS ${PROJECT_NAME} DESTINATION lib/$<IF:$<CONFIG:Debug>,debug,release>)
+    else ()
+        install(TARGETS ${PROJECT_NAME} EXPORT libqemu-cxx-targets)
+    endif ()
+
+    configure_package_config_file(libqemu-cxxConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/libqemu-cxxConfig.cmake
+        INSTALL_DESTINATION ${LIBQEMU_CXX_LIB_DIR}/cmake)
+
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/libqemu-cxxConfigVersion.cmake
+        VERSION 1.0.0
+        COMPATIBILITY AnyNewerVersion)
+
+    install(
+        FILES ${CMAKE_CURRENT_BINARY_DIR}/libqemu-cxxConfig.cmake
+                ${CMAKE_CURRENT_BINARY_DIR}/libqemu-cxxConfigVersion.cmake
+                DESTINATION ${LIBQEMU_CXX_LIB_DIR}/cmake)
 
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/qemu-components" DESTINATION ${CMAKE_INSTALL_PREFIX})
     set(QEMU_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/qemu-components")
-
+   
 endif() # WITHOUT_QEMU
-
-if (WITHOUT_QEMU)
-    target_compile_definitions(${PROJECT_NAME} PUBLIC WITHOUT_QEMU)
-endif()
 
 if(CMAKE_COMPILER_IS_GNUCC)
         target_compile_options(${PROJECT_NAME} PRIVATE
@@ -393,74 +496,34 @@ endif (APPLE)
 target_include_directories(
     ${PROJECT_NAME} PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/systemc-components/common/include>
-    $<INSTALL_INTERFACE:systemc-components/common/include>
-    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/systemc-components/gs_memory/include>
-    $<INSTALL_INTERFACE:systemc-components/gs_memory/include>
-    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/systemc-components/router/include>
-    $<INSTALL_INTERFACE:systemc-components/router/include>
-    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/systemc-components/reg_router/include>
-    $<INSTALL_INTERFACE:systemc-components/reg_router/include>
-)
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_PREFIX}>
+    ${LIBELF_INCLUDE_DIR}
+    ${pcie_model_SOURCE_DIR}
+    ${pcie_model_SOURCE_DIR}/libpcie/src
+    )
 
 target_link_libraries(${PROJECT_NAME} PUBLIC
-        SystemC::systemc
-        SystemC::cci-config
-        scp::reporting
-)
-
-target_link_libraries(${PROJECT_NAME} PRIVATE
+        ${TARGET_LIBS}
+        ${LIBELF_LIBRARIES}
+        Threads::Threads
         rpc
         ${CROW_DEP}
-        PkgConfig::LIBELF
-        Threads::Threads
-        PkgConfig::LIBZIP
-        PkgConfig::GLIB
+        zip
         ${PYBIND11_EMBED}
         ${CMAKE_DL_LIBS}
+        libpcie
 )
 
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/systemc-components" DESTINATION ${CMAKE_INSTALL_PREFIX})
 
-# --- Package configuration for find_package(qbox) ---
-include(CMakePackageConfigHelpers)
-
-add_library("qbox::${PROJECT_NAME}" ALIAS ${PROJECT_NAME})
-
-write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/qboxConfigVersion.cmake"
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
-)
-
-configure_package_config_file(
-    cmake/qboxConfig.cmake.in
-    "${CMAKE_CURRENT_BINARY_DIR}/qboxConfig.cmake"
-    INSTALL_DESTINATION lib/cmake/qbox-${PROJECT_VERSION}
-)
-
-install(TARGETS ${PROJECT_NAME}
-    EXPORT qboxTargets
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            COMPONENT qbox_Runtime
-            NAMELINK_COMPONENT qbox_Development
-)
-
-install(EXPORT qboxTargets
-    NAMESPACE qbox::
-    DESTINATION lib/cmake/qbox-${PROJECT_VERSION}
-)
-
-install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/qboxConfig.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/qboxConfigVersion.cmake"
-    DESTINATION lib/cmake/qbox-${PROJECT_VERSION}
-)
+set(QBOX_INCLUDE_DIR "${QEMU_INCLUDE_DIR};${CMAKE_CURRENT_SOURCE_DIR}/systemc-components")
+gs_export(${PROJECT_NAME} ${QBOX_INCLUDE_DIR})
 
 if (NOT DEFINED GS_ONLY)
-    install(TARGETS rpc)
+    install(TARGETS rpc zip DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
 endif()
-
-target_link_libraries(qbox-common INTERFACE ${PROJECT_NAME})
+    
+list(APPEND TARGET_LIBS ${PROJECT_NAME})
 
 if(NOT WITHOUT_QEMU)
     add_subdirectory(qemu-components)
@@ -468,7 +531,7 @@ if(NOT WITHOUT_QEMU)
 endif()
 
 add_subdirectory(systemc-components)
-if(ENABLE_PYTHON_BINDER AND (NOT GS_ONLY))
+if((NOT WITHOUT_PYTHON_BINDER) AND (NOT GS_ONLY))
     add_subdirectory(py-models)
 endif()
 add_subdirectory(html)
