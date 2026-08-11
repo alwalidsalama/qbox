@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All Rights Reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries. All Rights Reserved.
  * Author: GreenSocs 2022
  *
- * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #ifndef REALTIMLIMITER_H
@@ -32,6 +32,7 @@ SC_MODULE (realtimelimiter) {
     cci::cci_param<double> p_RTquantum_ms;
     cci::cci_param<double> p_SCTimeout_ms;
     cci::cci_param<double> p_MaxTime_ms;
+    cci::cci_param<double> p_MaxRunAhead_ms;
 
     std::chrono::high_resolution_clock::time_point startRT;
     sc_core::sc_time startSC;
@@ -82,11 +83,21 @@ SC_MODULE (realtimelimiter) {
         while (running) {
             std::this_thread::sleep_for(std::chrono::milliseconds(p_RTquantum_ms));
 
-            runto = sc_core::sc_time(std::chrono::duration_cast<std::chrono::microseconds>(
-                                         std::chrono::high_resolution_clock::now() - startRT)
-                                         .count(),
+            auto now = std::chrono::high_resolution_clock::now();
+            runto = sc_core::sc_time(std::chrono::duration_cast<std::chrono::microseconds>(now - startRT).count(),
                                      sc_core::SC_US) +
                     startSC;
+
+            /* Cap runto to MaxRunAhead_ms ahead of current SC time to prevent
+             * idle CPUs from letting SC sprint far ahead. Re-baseline on cap. */
+            sc_core::sc_time sc_now = sc_core::sc_time_stamp();
+            sc_core::sc_time cap = sc_now + sc_core::sc_time(p_MaxRunAhead_ms, sc_core::SC_MS);
+            if (runto > cap) {
+                runto = cap;
+                startRT = now;
+                startSC = sc_now;
+            }
+
             if (last > sc_core::SC_ZERO_TIME && sc_core::sc_time_stamp() == last) {
                 p_RTquantum_ms.set_value(p_RTquantum_ms.get_value() + 100);
                 if (p_SCTimeout_ms) {
@@ -138,6 +149,7 @@ public:
         , p_RTquantum_ms("RTquantum_ms", 100, "Real time quantum in milliseconds")
         , p_SCTimeout_ms("SCTimeout_ms", 0, "Timeout for SystemC in milliseconds")
         , p_MaxTime_ms("MaxTime_ms", 0, "Maximum run time in ms (0=no limit)")
+        , p_MaxRunAhead_ms("MaxRunAhead_ms", 500, "Max SC time allowed ahead of realtime in ms (caps drift)")
         , tick(false) // handle attach manually
     {
         SCP_TRACE(())("realtimelimiter constructor");

@@ -52,7 +52,18 @@ platform = {
 
     moduletype="Container";
 
-    quantum_ns = 10000000;
+    monitor = {
+        moduletype = "monitor";
+        server_port = 18088;
+        refresh_interval_ms=100;
+    };
+
+    rtl = {
+        moduletype="realtimelimiter";
+        log_level=4;
+        --SCTimeout_ms=180000;
+    };
+    quantum_ns = 100000;
 
     router = {
         moduletype="router";
@@ -70,11 +81,13 @@ platform = {
     },
 
     qemu_inst= {
+        --log_level=3;
         moduletype="QemuInstance";
         args = {"&platform.qemu_inst_mgr", "AARCH64"};
         accel = ACCEL,
         tcg_mode="MULTI",
-        sync_policy = "multithread-unconstrained"
+        sync_policy = "multithread-unconstrained",
+        time_sync_strategy = "mcips"; -- to switch to mcips replace quantum_keeper by mcips
     },
 
     gpex_0 ={
