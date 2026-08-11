@@ -144,11 +144,14 @@
             <tr>
                 <th>Plugin</th>
                 <th>QEMU Time</th>
+                <th>SC Time</th>
                 <th>vCPU Index</th>
                 <th>Instructions/sec</th>
                 <th>Delta Instructions</th>
                 <th>CPU Time</th>
-                <th>Status</th>
+                <th class="num">stop</th>
+                <th class="num">stopped</th>
+                <th class="num">halted</th>
             </tr>
         </thead>
         <tbody></tbody>
@@ -647,9 +650,12 @@
                 }
 
             } catch (error) {
+                // Report rather than swallow: a rendering bug here used to look identical to a
+                // disconnected VP (blank tables), which is very hard to debug.
+                console.error('monitor refresh failed:', error);
                 const statusElement = document.getElementById('sc_time');
                 statusElement.textContent = "Not connected";
-                sock.close();
+                if (sock) sock.close();
                 term.reset();
             }
         }
@@ -663,17 +669,9 @@
         });
 
          // ----- Constants & state -----
-        const STATUS = ['IDLE','PAUSED', 'RUNNING'];
+        const mcipsState = { lastActive: new Map() };
 
-        const mcipsState = {
-            // key: `${plugin}:${vcpuIndex}` => last known status text
-            prevStatus: new Map(),
-            lastActive: new Map(),
-        };
-
-        function keyFor(plugin, idx) { return `${plugin}:${idx}`; }
-
-        // Normalize active_vcpu_index
+        // Normalize master_vcpu_index (-1, or out of range, means no clock source)
         function normalizeActiveIndex(val, vcpuCount) {
             const n = Number(val);
             if (!Number.isFinite(n) || n < 0 || n >= vcpuCount || n > 1e12) return -1;
@@ -681,15 +679,20 @@
         }
 
         // Convert time from nanoseconds to seconds or keep as nanoseconds based on checkbox
-        function formatTime(timeStr, useSeconds) {
-            if (!timeStr) return '';
-            // Extract numeric value from string like "12345 ns"
-            const match = timeStr.match(/(\d+)/);
-            if (!match) return timeStr;
-            
-            const ns = Number(match[1]);
-            if (!Number.isFinite(ns)) return timeStr;
-            
+        // Accepts a plain number (e.g. 12345) or a string (e.g. "12345 ns").
+        function formatTime(timeVal, useSeconds) {
+            if (timeVal === undefined || timeVal === null || timeVal === '') return '';
+
+            let ns;
+            if (typeof timeVal === 'number') {
+                ns = timeVal;
+            } else {
+                const match = String(timeVal).match(/(\d+)/);
+                if (!match) return String(timeVal);
+                ns = Number(match[1]);
+            }
+            if (!Number.isFinite(ns)) return String(timeVal);
+
             if (useSeconds) {
                 const seconds = ns / 1e9;
                 return seconds.toFixed(9) + ' s';
@@ -704,6 +707,12 @@
             if (className) td.className = className;
             td.textContent = text ?? '';
             return td;
+        }
+
+        // 0/1 for booleans, '-' when the field is absent
+        function flagCell(v) {
+            if (v === undefined || v === null) return '-';
+            return v ? '1' : '0';
         }
 
         // ----- populate with improved visibility -----
@@ -724,27 +733,18 @@
                 // Stable order
                 vcpus.sort((a, b) => Number(a.index) - Number(b.index));
 
-                // Detect transitions + remember last RUNNING
+                // Remember the last cpu seen running. q_stop counts as not-running: pausing is
+                // two-phase, and a cpu with the stop requested is already committed to stopping.
                 vcpus.forEach(v => {
-                    const idx = Number(v.index);
-                    const cur = STATUS[Number(v.cpu_execution_status)] ?? 'UNKNOWN';
-                    const prev = mcipsState.prevStatus.get(keyFor(pluginName, idx));
-
-                    if (cur === 'RUNNING') {
-                        mcipsState.lastActive.set(pluginName, {
-                            index: idx,
-                            atScTime: p.qemu_time
-                        });
-                    }
-
-                    mcipsState.prevStatus.set(keyFor(pluginName, idx), cur);
+                    const running = !v.q_halted && !v.q_stopped && !v.q_stop;
+                    if (running) mcipsState.lastActive.set(pluginName, Number(v.index));
                 });
 
-                // Determine active and last active indices
-                const activeIdx = normalizeActiveIndex(p.active_vcpu_index, vcpus.length);
-                const allIdle = vcpus.length > 0 && vcpus.every(v => (STATUS[Number(v.cpu_execution_status)] ?? 'UNKNOWN') === 'IDLE');
+                // Determine master and last master indices
+                const activeIdx = normalizeActiveIndex(p.master_vcpu_index, vcpus.length);
+                const allIdle = vcpus.length > 0 && vcpus.every(v => v.q_halted || v.q_stopped || v.q_stop);
                 const last = mcipsState.lastActive.get(pluginName);
-                const lastActiveIndex = (allIdle && last && activeIdx === -1) ? Number(last.index) : null;
+                const lastActiveIndex = (allIdle && last !== undefined && activeIdx === -1) ? last : null;
 
                 // Draw block with rowSpan for plugin-level columns
                 const rowSpan = Math.max(vcpus.length, 1);
@@ -756,19 +756,26 @@
                     // Plugin-level cells once
                     if (i === 0) {
                         addCell(tr, pluginName, rowSpan);
-                        addCell(tr, formatTime(p.qemu_time, useSeconds), rowSpan, 'mono');
+                        addCell(tr, formatTime(p.qemu_time_ns, useSeconds), rowSpan, 'mono');
+                        addCell(tr, formatTime(p.sc_time_ns, useSeconds), rowSpan, 'mono');
                     }
 
                     // vCPU Index with highlighting
                     const tdIdx = addCell(tr, v.index ?? '-', 1, 'num');
                     const vCpuIdx = Number(v.index);
-                    
-                    // Highlight active vCPU in green
+
+                    // The plugin's own view of the clock source: highlight the whole row
+                    if (v.is_master) {
+                        tr.style.background = '#eef';
+                        tr.style.fontWeight = 'bold';
+                    }
+
+                    // Highlight master vCPU in green
                     if (vCpuIdx === activeIdx && activeIdx >= 0) {
                         tdIdx.style.backgroundColor = '#90EE90'; // Light green
                         tdIdx.style.fontWeight = 'bold';
                     }
-                    // Highlight last active vCPU in red when all are idle
+                    // Highlight last master vCPU in red when all are idle
                     else if (lastActiveIndex !== null && vCpuIdx === lastActiveIndex) {
                         tdIdx.style.backgroundColor = '#FFB6C6'; // Light red
                         tdIdx.style.fontWeight = 'bold';
@@ -778,13 +785,10 @@
                     addCell(tr, v.delta_insn ?? '0', 1, 'num mono');
                     addCell(tr, formatTime(v.cpu_time_ns, useSeconds), 1, 'mono');
 
-                    const statusText = STATUS[Number(v.cpu_execution_status)] ?? 'UNKNOWN';
-                    const tdStatus = tr.insertCell();
-                    tdStatus.textContent = statusText;
-                    tdStatus.style.color =
-                        statusText === 'RUNNING' ? 'green' :
-                            statusText === 'PAUSED' ? 'orange' :
-                                'gray';
+                    // Live QEMU run flags (diagnostics)
+                    addCell(tr, flagCell(v.q_stop), 1, 'num mono');
+                    addCell(tr, flagCell(v.q_stopped), 1, 'num mono');
+                    addCell(tr, flagCell(v.q_halted), 1, 'num mono');
 
                     frag.appendChild(tr);
                 }
