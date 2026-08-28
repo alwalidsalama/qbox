@@ -268,14 +268,9 @@ public:
      * paused, since churning the clock source is worse than waiting for it to come back. Only its
      * owner clears it, in vcpu_idle, when it genuinely halts.
      *
-     * Only a cpu that is actually running qualifies. A halted one retires nothing, so the clock would
-     * stand still. A paused one , or one asked to pause that has not taken the stop yet, see
-     * cpu_pause_pending , is never elected either, even when it is the only cpu left: electing it
-     * means resuming it, and from a vCPU callback that resume can be a lost wakeup if the cpu happens
-     * to be the caller (see request_resume), which parks it forever holding the clock. We do not need
-     * to take that risk here, because every caller has already run a peer-resume scan that asked the
-     * eligible paused cpus to resume. Returning nullptr lets the caller detach, so the rtl carries
-     * time; when one of those resumes lands, its resume_cb elects it as master and re-attaches.
+     * A halted cpu is skipped: it retires nothing, so the clock would stand still. A paused/pending
+     * cpu is elected too, but it drives the clock only once woken, so the caller resumes it (see
+     * vcpu_idle).
      *
      * The new master starts from the current QEMU time, dropping whatever lead or lag its old
      * checkpoint carried.
@@ -285,7 +280,6 @@ public:
         for (int i = 0; i < m_num_vcpus; i++) {
             vCPUTime* vcpu = get_vcpu(i);
             if (cpu_halted(vcpu)) continue;
-            if (cpu_paused_or_pending(vcpu)) continue;
 
             vcpu->cpu_time = m_qemu_time;
             vcpu->delta_insn = 0;
@@ -334,7 +328,6 @@ public:
         sc_core::sc_time min_time = sc_core::SC_ZERO_TIME;
         for (int i = 0; i < m_num_vcpus; i++) {
             auto* current_cpu = get_vcpu(i);
-            // if (current_cpu == vcpu) continue; /* never pace the master against itself, see above */ // ask mark
             if (cpu_halted(current_cpu)) continue;
             const sc_core::sc_time t = cpu_time_now(current_cpu);
             if (!slowest || t < min_time) {
@@ -379,20 +372,30 @@ public:
         /* Re-checked after the increment: shutdown may have started in the window between the load
          * above and the increment landing, in which case the drain wait has already passed us. */
         if (!m_shutdown.load(std::memory_order_seq_cst)) {
-            std::lock_guard<std::mutex> lock(m_mcips_mutex);
-            sc_current_window = sc_w;
+            /* Take the BQL before the pacing mutex (same order the vCPU callbacks already use). The
+             * resume below kicks a vCPU via qemu_cond_broadcast(halt_cond); per cpus.c that wake is
+             * only reliable while holding the BQL. This callback runs on the SystemC thread, which
+             * does NOT otherwise hold the BQL, so without this a resume requested here (the only way
+             * to wake a sole stopped master once every peer is halted) is lost against the master
+             * sitting in qemu_cond_wait(halt_cond, &bql) -> deadlock. */
+            m_inst.lock_iothread();
+            {
+                std::lock_guard<std::mutex> lock(m_mcips_mutex);
+                sc_current_window = sc_w;
 
-            for (int i = 0; i < m_num_vcpus; i++) {
-                auto* vcpu = get_vcpu(i);
-                if (!cpu_paused_or_pending(vcpu)) continue;
-                if (!cpu_should_pause(vcpu)) {
-                    request_resume(vcpu);
+                for (int i = 0; i < m_num_vcpus; i++) {
+                    auto* vcpu = get_vcpu(i);
+                    if (!cpu_paused_or_pending(vcpu)) continue;
+                    if (!cpu_should_pause(vcpu)) {
+                        request_resume(vcpu);
+                    }
+                }
+
+                if (m_master_vcpu.load(std::memory_order_relaxed)) {
+                    set_systemc_window();
                 }
             }
-
-            if (m_master_vcpu.load(std::memory_order_relaxed)) {
-                set_systemc_window();
-            }
+            m_inst.unlock_iothread();
         }
         m_inflight_cb.fetch_sub(1, std::memory_order_seq_cst);
     }
@@ -505,9 +508,8 @@ public:
                 request_resume(other);
             }
         }
-        if (!cpu_halted(vcpu)) { // even if it was paused cpu may excute few instructions so lets add this up to the
-                                 // time and request resume other cpus if possible
-            // no point in trying to resume
+        if (!cpu_halted(vcpu)) {
+            /* Paused, not halted: it may still run once resumed, so it is not our concern here. */
             SCP_WARN(()) << "vcpu_idle: cpu_" << cpu_index << " not halted -> paused, ignoring";
             return;
         }
@@ -518,6 +520,9 @@ public:
                 detach_sync_window();
                 return;
             }
+            /* A paused pick drives the clock only once woken; resume it unless pacing says it is
+             * ahead (safe: caller is halted). */
+            if (cpu_paused_or_pending(master) && !cpu_should_pause(master)) request_resume(master);
         }
         set_systemc_window();
     }
@@ -546,16 +551,6 @@ public:
             if (!m_master_vcpu.load(std::memory_order_relaxed)) {
                 m_master_vcpu.store(vcpu, std::memory_order_release);
             }
-
-            /*for (int i = 0; i < m_num_vcpus; i++) {
-                auto* other = get_vcpu(i);
-                if (other == vcpu) continue;
-
-                if (!cpu_paused_or_pending(other)) continue;
-                if (!cpu_should_pause(other)) {
-                    request_resume(other);
-                }
-            }*/
 
         } else if (!cpu_pause_pending(vcpu) && cpu_should_pause(vcpu)) {
             request_pause(vcpu);
@@ -590,7 +585,7 @@ public:
              * VIRTUAL timers to wake an idle cpu. Never report backwards: only clamp forwards. */
             const int64_t systemc_time_now = static_cast<int64_t>(sc_core::sc_time_stamp().to_seconds() *
                                                                   NSEC_IN_ONE_SEC);
-            if (systemc_time_now > qemu_time) { // experment
+            if (systemc_time_now > qemu_time) {
                 const int64_t warp_time = systemc_time_now - qemu_time;
                 for (int i = 0; i < m_num_vcpus; i++) {
                     vCPUTime* vcpu = get_vcpu(i);
