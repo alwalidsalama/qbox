@@ -315,7 +315,7 @@ public:
      * latches true forever and wedges it paused with nobody able to resume it. With every peer halted
      * the window is the only bound, which is what it is for.
      */
-    bool cpu_should_pause(vCPUTime* vcpu)
+    bool cpu_should_pause(vCPUTime* vcpu, vCPUTime* treat_halted = nullptr)
     {
         auto* master = m_master_vcpu.load(std::memory_order_relaxed);
         const sc_core::sc_time current_qemu_time = qemu_time_now(master);
@@ -328,6 +328,7 @@ public:
         sc_core::sc_time min_time = sc_core::SC_ZERO_TIME;
         for (int i = 0; i < m_num_vcpus; i++) {
             auto* current_cpu = get_vcpu(i);
+            if (current_cpu == treat_halted) continue;
             if (cpu_halted(current_cpu)) continue;
             const sc_core::sc_time t = cpu_time_now(current_cpu);
             if (!slowest || t < min_time) {
@@ -504,7 +505,9 @@ public:
             auto* other = get_vcpu(i);
             if (other == vcpu) continue;
             if (!cpu_paused_or_pending(other)) continue; /* nothing to resume (subsumes halted) */
-            if (!cpu_should_pause(other)) {
+            /* This vCPU is already entering QEMU's idle path. Do not let its
+             * transitional state keep a stopped clock master paused. */
+            if (!cpu_should_pause(other, vcpu)) {
                 request_resume(other);
             }
         }
