@@ -41,6 +41,7 @@
 #include <utility>
 #include <type_traits>
 #include <chrono>
+#include <cstring>
 #include <memory_services.h>
 
 #include <rpc/client.h>
@@ -545,6 +546,32 @@ private:
 
     std::unique_ptr<trans_waiter> btspt_waiter;
 
+    class suspendable_rpc_wait
+    {
+        bool m_restore_unsuspendable = false;
+
+    public:
+        suspendable_rpc_wait()
+        {
+            auto process = sc_core::sc_get_current_process_handle();
+            const char* name = process.basename();
+
+            /* runonsysc marks its jobs_handler unsuspendable while a job runs. */
+            if (name && std::strcmp(name, "jobs_handler") == 0 &&
+                dynamic_cast<gs::runonsysc*>(process.get_parent_object())) {
+                sc_core::sc_suspendable();
+                m_restore_unsuspendable = true;
+            }
+        }
+
+        ~suspendable_rpc_wait()
+        {
+            if (m_restore_unsuspendable) {
+                sc_core::sc_unsuspendable();
+            }
+        }
+    };
+
     template <typename... Args>
     std::future<RPCLIB_MSGPACK::object_handle> do_rpc_async_call(std::string const& func_name, Args... args)
     {
@@ -724,6 +751,7 @@ private:
             SCP_DEBUG(()) << name() << " B_TSPT wait for event, sc_get_curr_simcontext " << sc_get_curr_simcontext()
                           << " SC current process kind = " << sc_core::sc_get_curr_process_kind();
             if (sc_core::sc_get_curr_process_kind() != sc_core::sc_curr_proc_kind::SC_METHOD_PROC_) {
+                suspendable_rpc_wait suspendable_wait;
                 sc_core::wait(btspt_waiter->data_ready_events[id]); // systemc wait
             } else {
                 SCP_FATAL(()) << name() << " b_transport was called from the context of SC_METHOD!";
