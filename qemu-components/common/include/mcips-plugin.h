@@ -570,7 +570,17 @@ public:
         set_systemc_window();
     }
 
-    /** @brief Current sim time in ns for QEMU's iothread; lock-free (atomic shadow + master delta). */
+    /**
+     * @brief Current simulation time in ns for QEMU's virtual clock.
+     *
+     * Publish only committed master time. Combining m_qemu_time_ns with the
+     * master's live delta_insn is not a coherent snapshot: while a quota is
+     * transferred into m_qemu_time, a reader can briefly count the same delta
+     * twice (or miss it on the idle path), making QEMU's virtual clock move
+     * backwards on the next read. QEMU timer dispatch requires a monotonic
+     * clock. The clock therefore advances at MCIPS accounting boundaries,
+     * with the delay bounded by one quantum.
+     */
     int64_t get_qemu_clock(void* /*userdata*/)
     {
         // SCP_WARN(()) << "get_qemu_clock";
@@ -600,9 +610,6 @@ public:
                 m_qemu_time += sc_core::sc_time(static_cast<double>(warp_time), sc_core::SC_NS);
                 sync_qemu_time_ns();
             }
-        } else {
-            // delta_insn / insn_per_second are race-free to read here.
-            qemu_time += static_cast<int64_t>(cpu_delta_time(master).to_seconds() * NSEC_IN_ONE_SEC);
         }
 
         return qemu_time;
