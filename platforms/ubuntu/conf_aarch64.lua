@@ -91,17 +91,19 @@ platform = {
     },
 
     gpex_0 ={
-        moduletype = "qemu_gpex";
-        args = {"&platform.qemu_inst"};
+        moduletype = "gs_gpex";
+        log_level=3,
         bus_master = {bind = "&router.target_socket"};
         pio_iface = { address = 0x60200000, size = 0x0000100000, bind= "&router.initiator_socket"};
         mmio_iface = { address = 0x60300000, size = 0x001fd00000, bind= "&router.initiator_socket" };
         ecam_iface = { address = 0x43B50000, size = 0x0010000000, bind= "&router.initiator_socket" };
         mmio_iface_high = { address = 0x400000000, size = 0x200000000, bind= "&router.initiator_socket" },
-        irq_out_0 = {bind = "&gic_0.spi_in_541"};
-        irq_out_1 = {bind = "&gic_0.spi_in_542"};
-        irq_out_2 = {bind = "&gic_0.spi_in_543"};
-        irq_out_3 = {bind = "&gic_0.spi_in_544"};
+    };
+
+    nvme_disk_0 = {
+        moduletype = "nvme_ssd",
+        dylib_path = "nvme_ssd",
+        args = {"&platform.gpex_0"},
     };
 
     gic_0 =  {
@@ -111,7 +113,14 @@ platform = {
         redist_iface_0= {address=APSS_GIC600_GICD_APSS+OFFSET_APSS_ALIAS0_GICR_CTLR, size=0x1C0000, bind = "&router.initiator_socket"};
         num_cpus = ARM_NUM_CPUS,
         redist_region = {ARM_NUM_CPUS / NUM_REDISTS};
-        num_spi=960
+        num_spi=960,
+        has_lpi = true,
+    };
+
+    gic_its_0 = {
+        moduletype = "arm_gicv3_its",
+        args = {"&platform.qemu_inst", "&gic_0"},
+        mem = {address = 0x08080000, size = 0x20000, bind = "&router.initiator_socket"},
     };
 
     virtionet0_0= {
@@ -126,7 +135,7 @@ platform = {
         args = {"&platform.qemu_inst"};
         mem = { address = 0x1c0d0000, size = 0x2000, bind = "&router.initiator_socket"},
         irq_out = {bind = "&gic_0.spi_in_46"},
-        blkdev_str = "file="..top().."fw/Artifacts/image_ext4.img"..",format=raw,if=none,readonly=off" };
+        blkdev_str = "file="..top().."../../../firmware-images/ubuntu-image/Artifacts/image_ext4.img,format=raw,if=none,readonly=off" };
 
     charbackend_stdio_0 = {
         moduletype = "char_backend_stdio";
@@ -138,7 +147,11 @@ platform = {
         dylib_path = "uart-pl011",
         target_socket = {address= UART0, size=0x1000, bind = "&router.initiator_socket"},
         irq = {bind = "&gic_0.spi_in_379"},
-        backend_socket = {bind = "&charbackend_stdio_0.biflow_socket"},
+    };
+
+    uart_console_router = {
+        moduletype = "biflow_router",
+        socket = {bind = "&pl011_uart_0.backend_socket", sendto = "platform.pl011_uart_0.backend_socket"},
     };
 
     global_peripheral_initiator_arm_0 = {
@@ -157,12 +170,14 @@ platform = {
     load={
         moduletype = "loader",
         initiator_socket = {bind = "&router.target_socket"};
-        { bin_file=top().."fw/Artifacts/Image.bin", address=_KERNEL64_LOAD_ADDR };
-        { bin_file=top().."fw/Artifacts/ubuntu.dtb", address=_DTB_LOAD_ADDR };
-        { bin_file=top().."fw/Artifacts/image_ext4_initrd.img", address= _INITRD_LOAD_ADDR };
+        { bin_file=top().."../../../firmware-images/ubuntu-image/Artifacts/Image.bin", address=_KERNEL64_LOAD_ADDR };
+        { bin_file=top().."../../../firmware-images/ubuntu-image/Artifacts/qbox_pr34_ubuntu_its_root.dtb", address=_DTB_LOAD_ADDR };
+        { bin_file=top().."../../../firmware-images/ubuntu-image/Artifacts/image_ext4_initrd.img", address= _INITRD_LOAD_ADDR };
         { data=_bootloader_aarch64, address = INITIAL_DDR_SPACE};    
     };
 };
+
+platform.charbackend_stdio_0.biflow_socket = {bind = "&uart_console_router.socket"};
 
 print ("kernel is loaded at: 0x"..string.format("%x",_KERNEL64_LOAD_ADDR));
 print ("dtb is loaded at:    0x"..string.format("%x",_DTB_LOAD_ADDR));
@@ -183,6 +198,7 @@ if (ARM_NUM_CPUS > 0) then
             mem = {bind = "&router.target_socket"};
             has_el3 = false;
             has_el2 = false;
+            has_gicv3 = true;
             irq_timer_phys_out = {bind = "&gic_0.ppi_in_cpu_"..i.."_"..ARCH_TIMER_NS_EL1_IRQ},
             irq_timer_virt_out = {bind = "&gic_0.ppi_in_cpu_"..i.."_"..ARCH_TIMER_VIRT_IRQ},
             irq_timer_hyp_out = {bind = "&gic_0.ppi_in_cpu_"..i.."_"..ARCH_TIMER_NS_EL2_IRQ},
