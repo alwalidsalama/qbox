@@ -130,7 +130,16 @@ class QemuCpu : public QemuDevice, public QemuInitiatorIface
         using CpuTimeSyncStrategy::CpuTimeSyncStrategy;
 
         void on_end_of_elaboration() override;
+        void on_halt_pre(bool val) override;
+        void on_halt_post() override;
         void on_destroy() override;
+
+    private:
+        /*
+         * The halt direction, latched by on_halt_pre() for on_halt_post(). The plugin has to see
+         * cpu->stop already set, which only holds between the two hooks.
+         */
+        bool m_halting = false;
     };
 
 private:
@@ -936,6 +945,19 @@ inline void QemuCpu::McipsSync::on_end_of_elaboration()
         SCP_FATAL(()) << "Failed to set insn_per_second for cpu_" << m_qemu_cpu.m_cpu.get_index();
         sc_assert(false);
     }
+}
+
+inline void QemuCpu::McipsSync::on_halt_pre(bool val) { m_halting = val; }
+
+/*
+ * Tell the plugin this cpu was stopped from outside QEMU, so it can hand the virtual clock on
+ * rather than leave it parked on a cpu that will not advance it. Only the halt direction needs
+ * reporting: an unhalted cpu reclaims the clock at its first pacing point.
+ */
+inline void QemuCpu::McipsSync::on_halt_post()
+{
+    if (!m_halting) return;
+    m_qemu_cpu.m_inst.get_mcips_plugin().external_halt(m_qemu_cpu.m_cpu.get_index());
 }
 
 inline void QemuCpu::McipsSync::on_destroy()
