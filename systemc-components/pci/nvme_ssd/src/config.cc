@@ -19,6 +19,7 @@
 
 #include "config.h"
 #include "systemc.h"
+#include <scp/report.h>
 //#include "util/algorithm.hh"
 //#include "util/simplessd.hh"
 
@@ -75,7 +76,7 @@ bool Config::setConfig(const char *name, const char *value) {
         pcieGen = PCIExpress::PCIE_3_X;
         break;
       default:
-        SC_REPORT_WARNING("config", "Invalid PCI Express Generation");
+        SCP_WARN() << "Invalid PCI Express Generation";
         break;
     }
   }
@@ -103,7 +104,7 @@ bool Config::setConfig(const char *name, const char *value) {
         axiWidth = ARM::AXI::BUS_1024BIT;
         break;
       default:
-        SC_REPORT_WARNING("config", "Invalid AXI Stream Bus Width");
+        SCP_WARN() << "Invalid AXI Stream Bus Width";
         break;
     }
   }
@@ -171,13 +172,13 @@ bool Config::setConfig(const char *name, const char *value) {
 
 void Config::update() {
   if (popcount(lbaSize) != 1 || lbaSize < 512) {
-    SC_REPORT_WARNING("config", "Invalid LBA size");
+    SCP_WARN() << "Invalid LBA size";
   }
   if (maxRequestCount == 0) {
-    SC_REPORT_WARNING("config", "MaxRequestCount should be larger then 0");
+    SCP_WARN() << "MaxRequestCount should be larger then 0";
   }
   if (fifoUnit > 4096) {
-    SC_REPORT_WARNING("config", "FIFOTransferUnit should be less than or equal to 4096");
+    SCP_WARN() << "FIFOTransferUnit should be less than or equal to 4096";
   }
 }
 

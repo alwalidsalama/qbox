@@ -160,8 +160,7 @@ private:
 				cfg_init_socket->b_transport(trans, delay);
 				break;
 			default:
-				SC_REPORT_ERROR("pcie_versal",
-					"writing to an unimplemented bar");
+				SCP_ERR() << "writing to an unimplemented bar";
 				trans.set_response_status(
 					tlm::TLM_GENERIC_ERROR_RESPONSE);
 				break;

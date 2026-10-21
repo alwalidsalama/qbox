@@ -20,6 +20,7 @@
 #include "namespace.h"
 #include "algorithm.h"
 #include "systemc.h"
+#include <scp/report.h>
 #include <sstream>
 
 Namespace::Namespace(ConfigData &c)
@@ -116,18 +117,18 @@ void Namespace::setData(uint32_t id, Information *data) {
     diskSize = pDisk->open(filename, info.size * info.lbaSize, info.lbaSize);
 
     if (diskSize == 0) {
-      SC_REPORT_WARNING("namespace", "Failed to open disk image");
+      SCP_WARN() << "Failed to open disk image";
     }
     else if (diskSize != info.size * info.lbaSize) {
       if (NVME_STRICT_DISK_SIZE) {
-        SC_REPORT_WARNING("namespace", "Disk size not match");
+        SCP_WARN() << "Disk size not match";
       }
     }
 
     if (filename.length() > 0) {
       std::ostringstream msg;
       msg << "Using disk image at " << filename << " for NSID " << nsid;
-      SC_REPORT_INFO("namespace", msg.str().c_str());
+      SCP_INFO() << msg.str();
     }
   }
 
@@ -295,7 +296,7 @@ void Namespace::write(SQEntryWrapper &req) {
   }
   if (nlb == 0) {
     err = true;
-    SC_REPORT_WARNING("namespace", "host tried to write 0 blocks");
+    SCP_WARN() << "host tried to write 0 blocks";
   }
 
   /*
@@ -397,7 +398,7 @@ CQEntryWrapper Namespace::read(SQEntryWrapper &req, uint8_t *&buffer) {
   if (nlb == 0) {
     err = true;
     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS, STATUS_NAMESPACE_NOT_ATTACHED);
-    SC_REPORT_WARNING("namespace", "host tried to read 0 blocks");
+    SCP_WARN() << "host tried to read 0 blocks";
   }
 
   /*
@@ -438,7 +439,7 @@ void Namespace::compare(SQEntryWrapper &req) {
   }
   if (nlb == 0) {
     err = true;
-    SC_REPORT_WARNING("namespace", "host tried to read 0 blocks");
+    SCP_WARN() << "host tried to read 0 blocks";
   }
 
   /*

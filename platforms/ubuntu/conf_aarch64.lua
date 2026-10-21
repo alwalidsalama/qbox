@@ -49,21 +49,21 @@ ARM_NUM_CPUS = 8;
 local NUM_REDISTS = 1;
 
 platform = {
-
+    log_level=0;
     moduletype="Container";
 
     monitor = {
         moduletype = "monitor";
         server_port = 18088;
-        refresh_interval_ms=100;
+        refresh_interval_ms=1000;
     };
 
     rtl = {
         moduletype="realtimelimiter";
-        log_level=4;
+        --log_level=4;
         --SCTimeout_ms=180000;
     };
-    quantum_ns = 100000;
+    quantum_ns = 1000;
 
     router = {
         moduletype="router";
@@ -92,7 +92,7 @@ platform = {
 
     gpex_0 ={
         moduletype = "gs_gpex";
-        log_level=3,
+        --log_level=3,
         bus_master = {bind = "&router.target_socket"};
         pio_iface = { address = 0x60200000, size = 0x0000100000, bind= "&router.initiator_socket"};
         mmio_iface = { address = 0x60300000, size = 0x001fd00000, bind= "&router.initiator_socket" };

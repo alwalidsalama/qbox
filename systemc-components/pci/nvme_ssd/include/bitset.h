@@ -24,6 +24,7 @@
 
 #include <cinttypes>
 #include <vector>
+#include <scp/report.h>
 
 #include "systemc.h"
 
@@ -71,7 +72,7 @@ class Bitset {
     bool ret = true;
 
     if (lhs.dataSize != rhs.dataSize) {
-      SC_REPORT_WARNING("bitset", "Size does not match");
+      SCP_WARN() << "Size does not match";
     }
 
     for (uint32_t i = 0; i < lhs.allocSize; i++) {

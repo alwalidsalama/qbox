@@ -40,6 +40,7 @@
 #include "systemc.h"
 #include "tlm.h"
 #include "pci-device-base.h"
+#include <scp/report.h>
 
 #define NR_QDMA_IRQ      16
 
@@ -242,6 +243,8 @@ typedef struct {
 template<typename SW_CTX, typename INTR_CTX, typename INTR_RING_ENTRY>
 class qdma : public sc_module
 {
+    SCP_LOGGER(());
+
 private:
 
 	// Manual config items for now.
@@ -313,7 +316,7 @@ private:
 
 		/* Sanity check on the number of queue.	 */
 		if (!(msix_id < NR_QDMA_IRQ)) {
-			SC_REPORT_ERROR("qdma", "invalid MSIX ID");
+			SCP_ERR(()) << "invalid MSIX ID";
 		}
 
 		/* Each queue has it's own event to be triggered.  */
@@ -382,7 +385,7 @@ private:
 				data = this->queue_contexts[qid][sel].data;
 				break;
 			default:
-				SC_REPORT_ERROR("qdma", "Unsupported selector");
+				SCP_ERR(()) << "Unsupported selector";
 				return;
 			case QDMA_CTXT_SELC_INT_COAL:
 				/* Handled elsewere.  */
@@ -405,7 +408,7 @@ private:
 			case QDMA_CTXT_CMD_INV:
 				break;
 			default:
-				SC_REPORT_ERROR("qdma", "Unsupported command");
+				SCP_ERR(()) << "Unsupported command";
 				break;
 		}
 	}
@@ -508,8 +511,7 @@ private:
 
 			if (trans_ext[0].trans.get_response_status() !=
 				tlm::TLM_OK_RESPONSE) {
-				SC_REPORT_ERROR("qdma",
-					"error while fetching the data");
+				SCP_ERR(()) << "error while fetching the data";
 				return -1;
 			}
 
@@ -523,8 +525,7 @@ private:
 
 			if (trans_ext[1].trans.get_response_status() !=
 				tlm::TLM_OK_RESPONSE) {
-				SC_REPORT_ERROR("qdma",
-					"error while pushing the data");
+				SCP_ERR(()) << "error while pushing the data";
 				return -1;
 			}
 		}
@@ -551,7 +552,7 @@ private:
 				(struct x2c_wb_descriptor *) desc;
 
 		if (qid > QDMA_QUEUE_COUNT) {
-			SC_REPORT_ERROR("qdma", "invalid queue ID");
+			SCP_ERR(()) << "invalid queue ID";
 			return;
 		}
 
@@ -572,8 +573,7 @@ private:
 		/* Check that the producer index is in the descriptor ring, and
 		   isn't pointing to the status descriptor.  */
 		if (sw_ctx->pidx >= ring_size) {
-			SC_REPORT_ERROR("qdma", "Producer index outside the "
-					"descriptor ring.");
+			SCP_ERR(()) << "Producer index outside the descriptor ring.";
 		}
 
 		/* Running through the remaining descriptors from CIDX to
@@ -648,8 +648,7 @@ private:
 				intr_ctx->pidx = pidx;
 
 				if (!intr_ctx->valid) {
-					SC_REPORT_ERROR("qdma",
-						"invalid interrupt context");
+					SCP_ERR(()) << "invalid interrupt context";
 					return;
 				}
 
@@ -724,7 +723,7 @@ private:
 
 		return;
 err:
-		SC_REPORT_ERROR("qdma", "error fetching the descriptor");
+		SCP_ERR(()) << "error fetching the descriptor";
 	}
 
 	void descriptor_writeback(uint64_t addr, uint8_t size, uint8_t *data) {
@@ -740,8 +739,7 @@ err:
 		this->dma->b_transport(trans, delay);
 
 		if (trans.get_response_status() != tlm::TLM_OK_RESPONSE) {
-			SC_REPORT_ERROR("qdma",
-					"error writing back the descriptor");
+			SCP_ERR(()) << "error writing back the descriptor";
 		}
 	}
 
@@ -773,8 +771,7 @@ err:
 		this->dma->b_transport(trans, delay);
 
 		if (trans.get_response_status() != tlm::TLM_OK_RESPONSE) {
-			SC_REPORT_ERROR("qdma",
-					"error writing to the IRQ ring");
+			SCP_ERR(()) << "error writing to the IRQ ring";
 		}
 
 		/* Now that the entry is written increment the counter, if
@@ -824,8 +821,7 @@ err:
 		return;
 
 err:
-		SC_REPORT_WARNING("qdma",
-				"unsupported read / write on the axi bar");
+		SCP_WARN(()) << "unsupported read / write on the axi bar";
 		trans.set_response_status(tlm::TLM_GENERIC_ERROR_RESPONSE);
 	}
 
@@ -869,7 +865,7 @@ err:
   		unallocated = allocatedLogicalPages * logicalPageSize;
 		//pSubsystem->getNVMCapacity(totalSize, unallocated);
 
-		SC_REPORT_WARNING("qdma", "CONTROLLER IDFY");
+		SCP_WARN(()) << "CONTROLLER IDFY";
 
 		unallocated = totalSize - unallocated;
 
@@ -1646,7 +1642,7 @@ err:
 	bool identify(SQEntryWrapper &req) {
 		bool err = false;
 
-		SC_REPORT_WARNING("qdma", "IDENTIFY");
+		SCP_WARN(()) << "IDENTIFY";
 		CQEntryWrapper resp(req);
 		uint8_t cns = req.entry.dword10 & 0xFF;
 		//uint16_t cntid = (req.entry.dword10 & 0xFFFF0000) >> 16;
@@ -1663,9 +1659,9 @@ err:
 		//			cns, cntid, req.entry.namespaceID);
 		std::ostringstream msg;
 		switch (cns) {
-			case CNS_IDENTIFY_NAMESPACE:
-				msg << "ctrl idfy nsid " << req.entry.namespaceID;
-				SC_REPORT_INFO("qdma", msg.str().c_str());
+		case CNS_IDENTIFY_NAMESPACE:
+			msg << "ctrl idfy nsid " << req.entry.namespaceID;
+			SCP_INFO(()) << msg.str();
 			
 				if (req.entry.namespaceID == NSID_ALL) {
 					// FIXME: Not called by current(4.9.32) NVMe driver
@@ -1684,7 +1680,7 @@ err:
 				controller_identify(buffer);
 			break;
 			case CNS_ACTIVE_NAMESPACE_LIST:
-				SC_REPORT_ERROR("qdma", "unsupported idfy");
+				SCP_ERR(()) << "unsupported idfy";
 				/*
 				if (req.entry.namespaceID >= NSID_ALL - 1) {
 					err = true;
@@ -1701,7 +1697,7 @@ err:
 				*/
 				break;
 			case CNS_ALLOCATED_NAMESPACE_LIST:
-				SC_REPORT_ERROR("qdma", "unsupported idfy");
+				SCP_ERR(()) << "unsupported idfy";
 				/*
 				if (req.entry.namespaceID >= NSID_ALL - 1) {
 					err = true;
@@ -1718,7 +1714,7 @@ err:
 
 				break;
 			case CNS_IDENTIFY_ALLOCATED_NAMESPACE:
-				SC_REPORT_ERROR("qdma", "unsupported idfy");
+				SCP_ERR(()) << "unsupported idfy";
 				/*
 				for (auto &iter : lNamespaces) {
 					if (iter->getNSID() == req.entry.namespaceID) {
@@ -1728,7 +1724,7 @@ err:
 
 				break;
 			case CNS_ATTACHED_CONTROLLER_LIST:
-				SC_REPORT_ERROR("qdma", "unsupported idfy");
+				SCP_ERR(()) << "unsupported idfy";
 				/*
 				// Only one controller
 				if (cntid == 0) {
@@ -1737,7 +1733,7 @@ err:
 
 				break;
 			case CNS_CONTROLLER_LIST:
-				SC_REPORT_ERROR("qdma", "unsupported idfy");
+				SCP_ERR(()) << "unsupported idfy";
 				/*
 				// Only one controller
 				if (cntid == 0) {
@@ -1749,7 +1745,7 @@ err:
 		
 		if (ret && !err) {
 			write_dma_host(4096, req.entry.data1, buffer);
-			SC_REPORT_WARNING("qdma", "CTRL IDFY CMPL STS");
+			SCP_WARN(()) << "CTRL IDFY CMPL STS";
 			resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS, STATUS_SUCCESS);
 			write_cq_entry(resp);
 			// TODO(jhieb) support SGL.
@@ -1823,7 +1819,7 @@ err:
 					break;
 			}
 		}
-		SC_REPORT_WARNING("qdma", "set features CMPL STS");
+		SCP_WARN(()) << "set features CMPL STS";
 		write_cq_entry(resp);
 
 		return true;
@@ -1899,7 +1895,7 @@ err:
 				resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS, STATUS_SUCCESS);
 			}
 		}
-		SC_REPORT_WARNING("qdma", "create Cqueue CMPL STS");
+		SCP_WARN(()) << "create Cqueue CMPL STS";
 		write_cq_entry(resp);
 
 		return true;
@@ -1955,7 +1951,7 @@ err:
 				resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS, STATUS_SUCCESS);
 			}
 		}
-		SC_REPORT_WARNING("qdma", "create Squeue CMPL STS");
+		SCP_WARN(()) << "create Squeue CMPL STS";
 		write_cq_entry(resp);
 
 		return true;
@@ -1984,11 +1980,11 @@ err:
 
 		switch (lid) {
 			case LOG_ERROR_INFORMATION:
-				SC_REPORT_WARNING("qdma", "LOG ERROR INFORMATION");
+				SCP_WARN(()) << "LOG ERROR INFORMATION";
 				ret = true;
 				break;
 			case LOG_SMART_HEALTH_INFORMATION: {
-				SC_REPORT_WARNING("qdma", "LOG SMART HEALTH");
+				SCP_WARN(()) << "LOG SMART HEALTH";
 				if (req.entry.namespaceID == NSID_ALL) {
 					ret = true;
 					submit = false;
@@ -2007,7 +2003,7 @@ err:
 				}
 				} break;
 			case LOG_FIRMWARE_SLOT_INFORMATION:
-				SC_REPORT_WARNING("qdma", "LOG FIRMWARE SLOT");
+				SCP_WARN(()) << "LOG FIRMWARE SLOT";
 				ret = true;
 				break;
 			default:
@@ -2019,7 +2015,7 @@ err:
 
 		if (ret) {
 			//write_dma_host(4096, req.entry.data1, buffer);
-			SC_REPORT_WARNING("qdma", "GET LOG PAGE CMPL");
+			SCP_WARN(()) << "GET LOG PAGE CMPL";
 			resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS, STATUS_SUCCESS);
 			write_cq_entry(resp);
 			// TODO(jhieb) support SGL.
@@ -2052,7 +2048,7 @@ err:
 			switch (req.entry.dword0.opcode) {
 				case OPCODE_DELETE_IO_SQUEUE:
 					//processed = deleteSQueue(req, func);
-					SC_REPORT_ERROR("qdma", "unsupported opcode DELETE IO SQUEUE");
+					SCP_ERR(()) << "unsupported opcode DELETE IO SQUEUE";
 					break;
 				case OPCODE_CREATE_IO_SQUEUE:
 					processed = createSQueue(req);
@@ -2062,7 +2058,7 @@ err:
 					break;
 				case OPCODE_DELETE_IO_CQUEUE:
 					//processed = deleteCQueue(req, func);
-					SC_REPORT_ERROR("qdma", "unsupported opcode DELETE IO CQUEUE");
+					SCP_ERR(()) << "unsupported opcode DELETE IO CQUEUE";
 					break;
 				case OPCODE_CREATE_IO_CQUEUE:
 					processed = createCQueue(req);
@@ -2072,28 +2068,28 @@ err:
 					break;
 				case OPCODE_ABORT:
 					//processed = abort(req, func);
-					SC_REPORT_ERROR("qdma", "unsupported opcode ABORT");
+					SCP_ERR(()) << "unsupported opcode ABORT";
 					break;
 				case OPCODE_SET_FEATURES:
 					processed = setFeatures(req);
 					break;
 				case OPCODE_GET_FEATURES:
 					//processed = getFeatures(req, func);
-					SC_REPORT_ERROR("qdma", "unsupported opcode GET FEATURES");
+					SCP_ERR(()) << "unsupported opcode GET FEATURES";
 					break;
 				case OPCODE_ASYNC_EVENT_REQ:
 					break;
 				case OPCODE_NAMESPACE_MANAGEMENT:
 					//processed = namespaceManagement(req, func);
-					SC_REPORT_ERROR("qdma", "unsupported opcode");
+					SCP_ERR(()) << "unsupported opcode";
 					break;
 				case OPCODE_NAMESPACE_ATTACHMENT:
 					//processed = namespaceAttachment(req, func);
-					SC_REPORT_ERROR("qdma", "unsupported opcode");
+					SCP_ERR(()) << "unsupported opcode";
 					break;
 				case OPCODE_FORMAT_NVM:
 					//processed = formatNVM(req, func);
-					SC_REPORT_ERROR("qdma", "unsupported opcode");
+					SCP_ERR(()) << "unsupported opcode";
 					break;
 				default:
 					resp.makeStatus(true, false, TYPE_GENERIC_COMMAND_STATUS,
@@ -2142,7 +2138,7 @@ err:
 								}
 
       							msg << "read slba " << slba << " nlb " << nlb;
-      							SC_REPORT_INFO("qdma", msg.str().c_str());
+								SCP_INFO(()) << msg.str();
 								// delete list;
 								free(buffer);
 								buffer = NULL;
@@ -2169,7 +2165,7 @@ err:
 		if (!processed) {
 			resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS,
 							STATUS_ABORT_INVALID_NAMESPACE);
-			SC_REPORT_ERROR("qdma", "FAILED TO SUBMIT COMMAND");
+			SCP_ERR(()) << "FAILED TO SUBMIT COMMAND";
 			//func(resp);
 		}
 	}
@@ -2188,7 +2184,7 @@ err:
 		uint64_t addr = pQueue->getBaseAddr() + pQueue->getTail() * cqstride;
 		pQueue->setData(&(resp.entry));
 		this->descriptor_writeback(addr, cqstride, resp.entry.data);
-		SC_REPORT_WARNING("qdma", "CQ Entry Push MSIX");
+		SCP_WARN(()) << "CQ Entry Push MSIX";
 		this->msix_trig[resp.cqID].notify();
 	}
 
@@ -2221,10 +2217,10 @@ err:
 
 			if(uiMask){
 				ringCQHeadDoorbell(sqid, data);
-				SC_REPORT_WARNING("qdma", "RING CQ TAIL DOORBELL");
+				SCP_WARN(()) << "RING CQ TAIL DOORBELL";
 			} else {
 				ringSQTailDoorbell(sqid, data);
-				SC_REPORT_WARNING("qdma", "RING SQ TAIL DOORBELL");
+				SCP_WARN(()) << "RING SQ TAIL DOORBELL";
 				lSQFIFO.push_back(read_sq_entry(sqid));
 				handle_request();
 			}
@@ -2311,7 +2307,7 @@ err:
                 adminQueueInited++;
                 break;
 			default:
-			    SC_REPORT_WARNING("qdma", "unsupported register write");
+			    SCP_WARN(()) << "unsupported register write";
 				break;
 		}
 
@@ -2463,8 +2459,7 @@ err:
 		trans.set_response_status(tlm::TLM_OK_RESPONSE);
 		return;
 err:
-		SC_REPORT_WARNING("qdma",
-				"unsupported read / write on the config bar");
+		SCP_WARN(()) << "unsupported read / write on the config bar";
 		trans.set_response_status(tlm::TLM_GENERIC_ERROR_RESPONSE);
 		return;
 	}
@@ -2562,7 +2557,7 @@ err:
 				last.nlp = iter.slpn - last.slpn;
 			}
 			else {
-				SC_REPORT_WARNING("qdma", "create namespace bug");
+				SCP_WARN(()) << "create namespace bug";
 			}
 		}
 
@@ -2720,7 +2715,7 @@ public:
 			}
 
 			if (info.lbaFormatIndex == nLBAFormat) {
-				SC_REPORT_WARNING("qdma", "Failed to setting LBA size (512B ~ 4KB)");
+				SCP_WARN(()) << "Failed to setting LBA size (512B ~ 4KB)";
 			}
 
 			// Fill Namespace information
@@ -2736,7 +2731,7 @@ public:
 					lNamespaces.back()->attach(true);
 				}
 				else {
-					SC_REPORT_WARNING("qdma", "Failed to create namespace");
+					SCP_WARN(()) << "Failed to create namespace";
 				}
 			}
 		}

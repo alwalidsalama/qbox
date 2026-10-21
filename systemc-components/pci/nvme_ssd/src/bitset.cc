@@ -152,7 +152,7 @@ bool Bitset::operator[](uint32_t idx) noexcept {
 
 Bitset &Bitset::operator&=(const Bitset &rhs) {
   if (dataSize != rhs.dataSize) {
-    SC_REPORT_WARNING("bitset", "Size does not match");
+    SCP_WARN() << "Size does not match";
   }
 
   for (uint32_t i = 0; i < allocSize; i++) {
@@ -164,7 +164,7 @@ Bitset &Bitset::operator&=(const Bitset &rhs) {
 
 Bitset &Bitset::operator|=(const Bitset &rhs) {
   if (dataSize != rhs.dataSize) {
-    SC_REPORT_WARNING("bitset", "Size does not match");
+    SCP_WARN() << "Size does not match";
   }
 
   for (uint32_t i = 0; i < allocSize; i++) {
@@ -176,7 +176,7 @@ Bitset &Bitset::operator|=(const Bitset &rhs) {
 
 Bitset &Bitset::operator^=(const Bitset &rhs) {
   if (dataSize != rhs.dataSize) {
-    SC_REPORT_WARNING("bitset", "Size does not match");
+    SCP_WARN() << "Size does not match";
   }
 
   for (uint32_t i = 0; i < allocSize; i++) {

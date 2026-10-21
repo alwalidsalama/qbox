@@ -19,6 +19,7 @@
 
 #include "queue.h"
 #include "systemc.h"
+#include <scp/report.h>
 
 SQEntry::_SQEntry() {
   memset(data, 0, 64);
@@ -134,7 +135,7 @@ void CQueue::setData(CQEntry *entry) {
     }
 
     if (head == tail) {
-      SC_REPORT_WARNING("CQueue", "Completion queue overflow");
+      SCP_WARN() << "Completion queue overflow";
     }
   }
 }

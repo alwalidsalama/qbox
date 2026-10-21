@@ -19,6 +19,7 @@
 
 #include "dma.h"
 #include "systemc.h"
+#include <scp/report.h>
 
 //#include "hil/nvme/controller.hh"
 //#include "util/algorithm.hh"
@@ -71,7 +72,7 @@ PRPList::PRPList(ConfigData &cfg, DMAFunction &f, void *c, uint64_t prp1,
       prpList.push_back(PRP(prp2, prp2Size));
 
       if (prp1Size + prp2Size < totalSize) {
-        SC_REPORT_WARNING("prplist", "Invalid DPTR size");
+        SCP_WARN() << "Invalid DPTR size";
       }
     }
   }
@@ -82,7 +83,7 @@ PRPList::PRPList(ConfigData &cfg, DMAFunction &f, void *c, uint64_t prp1,
       prpList.push_back(PRP(prp2, prp2Size));
 
       if (prp1Size + prp2Size < totalSize) {
-        SC_REPORT_WARNING("prplist", "Invalid DPTR size");
+        SCP_WARN() << "Invalid DPTR size";
       }
     }
     else {
@@ -138,7 +139,7 @@ void PRPList::processPRPListBuffer(){
     currentSize += listPRPSize;
 
     if (listPRP == 0) {
-      SC_REPORT_WARNING("prplist", "Invalid PRP in PRP List");
+      SCP_WARN() << "Invalid PRP in PRP List";
     }
 
     prpList.push_back(PRP(listPRP, listPRPSize));
@@ -319,12 +320,12 @@ void SGL::parseSGLDescriptor(SGLDescriptor &desc) {
 
       break;
     default:
-      SC_REPORT_WARNING("sgl", "Invalid SGL descriptor");
+      SCP_WARN() << "Invalid SGL descriptor";
       break;
   }
 
   if (SGL_SUBTYPE(desc.id) != SUBTYPE_ADDRESS) {
-    SC_REPORT_WARNING("sgl", "Unexpected SGL subtype");
+    SCP_WARN() << "Unexpected SGL subtype";
   }
 }
 
@@ -346,7 +347,7 @@ void SGL::parseSGLSegment() {
       case TYPE_SEGMENT_DESCRIPTOR:
       case TYPE_LAST_SEGMENT_DESCRIPTOR:
         if (i != pContext->currentSize - 16) {
-          SC_REPORT_WARNING("sgl", "Invalid SGL segment");
+          SCP_WARN() << "Invalid SGL segment";
         }
         next = true;
 

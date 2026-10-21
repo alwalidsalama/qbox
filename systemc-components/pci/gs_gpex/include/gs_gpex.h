@@ -158,7 +158,7 @@ protected:
             lower_bar.base_addr |= (static_cast<uint64_t>(value) << 32);
         }
 
-        SCP_INFO() << "Updated BAR" << (int)bar_index 
+        SCP_INFO(()) << "Updated BAR" << (int)bar_index
                    << " for device " << (int)device 
                    << ": addr=0x" << std::hex << bar.base_addr
                    << " 64bit=" << bar.is_64bit
@@ -208,7 +208,7 @@ protected:
             uint32_t reg_offset = addr & 0xFFF;
             // TODO(jhieb) ignore the 0xFFFF status write for now??  How is the root supposed to handle status reg writes?
             if(reg_offset == 0x6){
-                SCP_INFO() << "PCI STS WRITE";
+                SCP_INFO(()) << "PCI STS WRITE";
                 get_bdf_from_address(addr, bus, device, function);
                 txn.set_response_status(tlm::TLM_OK_RESPONSE);
                 return;
@@ -257,7 +257,7 @@ protected:
 
                 uint64_t test_log = 0;
                 memcpy(&test_log, ptr, std::min(static_cast<size_t>(len), sizeof(uint64_t)));
-                SCP_INFO() << "ECAM Root " << get_txn_command_str(txn) << " to address: 0x" << std::hex << addr << " len: 0x" << std::hex << len << " data: 0x" << std::setw(len*2) << std::setfill('0') << test_log;
+                SCP_INFO(()) << "ECAM Root " << get_txn_command_str(txn) << " to address: 0x" << std::hex << addr << " len: 0x" << std::hex << len << " data: 0x" << std::setw(len*2) << std::setfill('0') << test_log;
 
                 // DW3: Align data payload based on byte offset
                 uint8_t byte_offset = addr & 0x3;  // Offset within DWORD
@@ -378,7 +378,7 @@ protected:
                     memcpy(ptr, payload_ptr + byte_offset, len);       
                     uint64_t test_log = 0;
                     memcpy(&test_log, payload_ptr + byte_offset, std::min(static_cast<size_t>(len), sizeof(uint64_t)));
-                    SCP_INFO() << "ECAM Root " << get_txn_command_str(txn) << " to address: 0x" << std::hex << addr << " len: 0x" << std::hex << len << " data: 0x" << std::setw(len*2) << std::setfill('0') << test_log;
+                    SCP_INFO(()) << "ECAM Root " << get_txn_command_str(txn) << " to address: 0x" << std::hex << addr << " len: 0x" << std::hex << len << " data: 0x" << std::setw(len*2) << std::setfill('0') << test_log;
                 } else {
                     txn.set_response_status(tlm::TLM_GENERIC_ERROR_RESPONSE);
                     return;
@@ -397,7 +397,7 @@ protected:
         bool is_64bit_addr;
         TLPCompletionWithData resp;
 
-        SCP_INFO() << "Root MMIO " << get_txn_command_str(txn) << " to address: 0x" << std::hex << addr << " len: 0x" << std::hex << len;
+        SCP_INFO(()) << "Root MMIO " << get_txn_command_str(txn) << " to address: 0x" << std::hex << addr << " len: 0x" << std::hex << len;
         switch (txn.get_command()) {
             case tlm::TLM_READ_COMMAND:
                 handle_mmio_read(txn, delay);
@@ -418,7 +418,7 @@ protected:
         unsigned char* byt = txn.get_byte_enable_ptr();
         unsigned int bel = txn.get_byte_enable_length();
         
-        SCP_INFO() << "Root MMIO HIGH " << get_txn_command_str(txn) << " to address: 0x" << std::hex << addr << " len: 0x" << std::hex << len;
+        SCP_INFO(()) << "Root MMIO HIGH " << get_txn_command_str(txn) << " to address: 0x" << std::hex << addr << " len: 0x" << std::hex << len;
         // TODO support and update if we end up needing 64 bit BARs.
         txn.set_response_status(tlm::TLM_OK_RESPONSE);
         return;
@@ -670,7 +670,7 @@ protected:
 
             txn.set_response_status(tlm::TLM_OK_RESPONSE);
         } else {
-            SCP_WARN() << "Memory read completion error, status: " << resp.dword1.status;
+            SCP_WARN(()) << "Memory read completion error, status: " << resp.dword1.status;
             txn.set_response_status(tlm::TLM_GENERIC_ERROR_RESPONSE);
             return;
         }
@@ -683,7 +683,7 @@ protected:
         unsigned char* byt = txn.get_byte_enable_ptr();
         unsigned int bel = txn.get_byte_enable_length();
         
-        SCP_INFO() << "Root PIO " << get_txn_command_str(txn) << " to address: 0x" << std::hex << addr << " len: 0x" << std::hex << len;
+        SCP_INFO(()) << "Root PIO " << get_txn_command_str(txn) << " to address: 0x" << std::hex << addr << " len: 0x" << std::hex << len;
         txn.set_response_status(tlm::TLM_OK_RESPONSE);
         return;
     }
@@ -739,7 +739,7 @@ protected:
         unsigned int bel = txn.get_byte_enable_length();
         
         if(len < 12){
-            SCP_WARN() << "TLP too short: " << len << "bytes";
+            SCP_WARN(()) << "TLP too short: " << len << "bytes";
             txn.set_response_status(tlm::TLM_GENERIC_ERROR_RESPONSE);
             return;
         }
@@ -788,7 +788,7 @@ protected:
             handle_dma_read(txn, delay, fmt);
             
         } else {
-            SCP_WARN() << "Unknown TLP type from device " << id 
+            SCP_WARN(()) << "Unknown TLP type from device " << id
                     << ": fmt=0x" << std::hex << (int)fmt 
                     << " type=0x" << (int)type;
             txn.set_response_status(tlm::TLM_GENERIC_ERROR_RESPONSE);
